@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import Sidebar from "./components/Sidebar";
 import Profile from "./Profile";
 import Sign from "./Sign";
@@ -6,6 +6,27 @@ import Messages from "./Messages";
 import Matches from "./Matches";
 import Likes from "./Likes";
 import { useUser } from "./context/UserProvider.jsx";
+import {
+  VIEW_STATES,
+  ANIMATION_TIMINGS,
+  ERROR_MESSAGES,
+  DEFAULT_VALUES,
+} from "./constants/app.js";
+import { userAPI } from "./utils/api.js";
+import {
+  ArrowUpIcon,
+  ArrowDownIcon,
+  HeartIcon,
+  ThumbsUpIcon,
+  MessageIcon,
+} from "./components/icons/index.jsx";
+import {
+  LoadingState,
+  ErrorState,
+  EmptyState,
+  Avatar,
+  Button,
+} from "./components/common/index.jsx";
 
 /**
  * SafeSpeak - Main Application Component
@@ -32,7 +53,10 @@ function App() {
   // ==================== STATE MANAGEMENT ====================
 
   /** Current active view in the application */
-  const [currentView, setCurrentView] = useState("home"); // 'home', 'profile', 'messages', 'matches', 'likes'
+  const [currentView, setCurrentView] = useState(VIEW_STATES.HOME);
+
+  /** Selected match for messaging */
+  const [selectedMatchId, setSelectedMatchId] = useState(null);
 
   /** Controls visibility of user profile dropdown menu */
   const [showDropdown, setShowDropdown] = useState(false);
@@ -48,6 +72,90 @@ function App() {
 
   /** Ref for tracking last scroll event timestamp to prevent rapid firing */
   const lastScrollTimeRef = useRef(0);
+
+  /** Array of users from the feed API */
+  const [users, setUsers] = useState([]);
+
+  /** Loading state for fetching users */
+  const [isLoadingUsers, setIsLoadingUsers] = useState(true);
+
+  /** Error state for user fetching */
+  const [userError, setUserError] = useState(null);
+
+  // ==================== EFFECTS ====================
+
+  useEffect(() => {
+    // Listen for custom navigation events from Matches component
+    const handleNavigateToMessages = (event) => {
+      setSelectedMatchId(event.detail.matchId);
+      setCurrentView("messages");
+    };
+
+    window.addEventListener("navigateToMessages", handleNavigateToMessages);
+
+    return () => {
+      window.removeEventListener(
+        "navigateToMessages",
+        handleNavigateToMessages
+      );
+    };
+  }, []);
+
+  useEffect(() => {
+    if (user) {
+      fetchUserFeed();
+    }
+  }, [user]);
+
+  // ==================== API CALLS ====================
+
+  /**
+   * Fetches user feed from the API
+   */
+  const fetchUserFeed = async () => {
+    try {
+      setIsLoadingUsers(true);
+      setUserError(null);
+
+      const data = await userAPI.fetchFeed();
+      setUsers(data.feed || []);
+    } catch (error) {
+      console.error("Error fetching user feed:", error);
+      setUserError(ERROR_MESSAGES.USER_FEED_FAILED);
+    } finally {
+      setIsLoadingUsers(false);
+    }
+  };
+
+  /**
+   * Likes a user (swipe right)
+   * @param {string} userId - ID of the user to like
+   */
+  const likeUser = async (userId) => {
+    try {
+      const data = await userAPI.likeUser(userId);
+
+      // If it's a match, you could show a notification
+      if (data.match) {
+        // TODO: Show match notification
+        console.log("It's a match!", data);
+      }
+
+      // Move to next user
+      handleNextUser();
+    } catch (error) {
+      console.error("Error liking user:", error);
+      setUserError(ERROR_MESSAGES.LIKE_FAILED);
+    }
+  };
+
+  /**
+   * Passes on a user (swipe left)
+   */
+  const passUser = () => {
+    // Just move to next user without liking
+    handleNextUser();
+  };
 
   // ==================== LOADING STATE ====================
 
@@ -70,66 +178,6 @@ function App() {
     return <Sign />;
   }
 
-  // ==================== MOCK DATA ====================
-
-  /**
-   * Mock user data for development and demonstration
-   * In production, this would be fetched from a backend API
-   * Each user represents someone seeking mental health support
-   */
-  const users = [
-    {
-      id: 1,
-      handle: "anonymous_soul",
-      struggles: ["Anxiety", "Depression"],
-      avatar:
-        "https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?w=150&h=150&fit=crop&crop=face",
-      bio: "Looking for someone to talk to...",
-      age: "24",
-      location: "Online",
-    },
-    {
-      id: 2,
-      handle: "quiet_mind",
-      struggles: ["Social Anxiety", "Loneliness"],
-      avatar:
-        "https://images.unsplash.com/photo-1425082661705-1834bfd09dca?w=150&h=150&fit=crop&crop=face",
-      bio: "Here to listen and share",
-      age: "19",
-      location: "Online",
-    },
-    {
-      id: 3,
-      handle: "hopeful_heart",
-      struggles: ["Grief", "Loss"],
-      avatar:
-        "https://images.unsplash.com/photo-1574158622682-e40e69881006?w=150&h=150&fit=crop&crop=face",
-      bio: "Finding strength in vulnerability",
-      age: "31",
-      location: "Online",
-    },
-    {
-      id: 4,
-      handle: "peaceful_warrior",
-      struggles: ["PTSD", "Trauma"],
-      avatar:
-        "https://images.unsplash.com/photo-1583337130417-3346a1be7dee?w=150&h=150&fit=crop&crop=face",
-      bio: "Healing one day at a time",
-      age: "28",
-      location: "Online",
-    },
-    {
-      id: 5,
-      handle: "gentle_soul",
-      struggles: ["Eating Disorder", "Self-esteem"],
-      avatar:
-        "https://images.unsplash.com/photo-1601758228041-f3b2795255f1?w=150&h=150&fit=crop&crop=face",
-      bio: "Learning to love myself",
-      age: "22",
-      location: "Online",
-    },
-  ];
-
   // ==================== EVENT HANDLERS ====================
 
   /**
@@ -145,10 +193,7 @@ function App() {
    */
   const handleSignOut = async () => {
     try {
-      await fetch(`${import.meta.env.VITE_API_URI}/auth/logout`, {
-        method: "GET",
-        credentials: "include",
-      });
+      await userAPI.logout();
       // The UserProvider will detect the logout and redirect to Sign component
       window.location.reload();
     } catch (error) {
@@ -162,7 +207,7 @@ function App() {
    * Closes the dropdown menu after navigation
    */
   const handleProfileView = () => {
-    setCurrentView("profile");
+    setCurrentView(VIEW_STATES.PROFILE);
     setShowDropdown(false);
   };
 
@@ -171,7 +216,7 @@ function App() {
    * Used by Profile and Messages components
    */
   const handleBackHome = () => {
-    setCurrentView("home");
+    setCurrentView(VIEW_STATES.HOME);
   };
 
   /**
@@ -179,7 +224,7 @@ function App() {
    * Called from Sidebar or mobile navigation
    */
   const handleMessagesView = () => {
-    setCurrentView("messages");
+    setCurrentView(VIEW_STATES.MESSAGES);
   };
 
   /**
@@ -187,7 +232,7 @@ function App() {
    * Shows all mutual matches
    */
   const handleMatchesView = () => {
-    setCurrentView("matches");
+    setCurrentView(VIEW_STATES.MATCHES);
   };
 
   /**
@@ -195,7 +240,7 @@ function App() {
    * Shows all users you liked and who liked you
    */
   const handleLikesView = () => {
-    setCurrentView("likes");
+    setCurrentView(VIEW_STATES.LIKES);
   };
 
   /**
@@ -208,15 +253,15 @@ function App() {
 
     setIsAnimating(true);
 
-    // Start animation and change user after 150ms
+    // Start animation and change user after delay
     setTimeout(() => {
       setCurrentUserIndex((prev) => (prev + 1) % users.length);
-    }, 150);
+    }, ANIMATION_TIMINGS.CARD_CHANGE_DELAY);
 
-    // Reset animation state after 400ms (total animation duration)
+    // Reset animation state after total duration
     setTimeout(() => {
       setIsAnimating(false);
-    }, 400);
+    }, ANIMATION_TIMINGS.CARD_TRANSITION);
   };
 
   /**
@@ -229,15 +274,15 @@ function App() {
 
     setIsAnimating(true);
 
-    // Start animation and change user after 150ms
+    // Start animation and change user after delay
     setTimeout(() => {
       setCurrentUserIndex((prev) => (prev - 1 + users.length) % users.length);
-    }, 150);
+    }, ANIMATION_TIMINGS.CARD_CHANGE_DELAY);
 
-    // Reset animation state after 400ms (total animation duration)
+    // Reset animation state after total duration
     setTimeout(() => {
       setIsAnimating(false);
-    }, 400);
+    }, ANIMATION_TIMINGS.CARD_TRANSITION);
   };
 
   /**
@@ -249,7 +294,7 @@ function App() {
    */
   const handleWheel = (e) => {
     // Only handle scroll on home view and when not animating
-    if (currentView !== "home" || isAnimating) return;
+    if (currentView !== VIEW_STATES.HOME || isAnimating) return;
 
     e.preventDefault(); // Prevent default scroll behavior
     e.stopPropagation(); // Stop event bubbling
@@ -263,10 +308,13 @@ function App() {
     }
 
     // Only process scroll if enough time has passed and scroll is significant
-    if (timeSinceLastScroll > 100 && Math.abs(e.deltaY) > 30) {
+    if (
+      timeSinceLastScroll > ANIMATION_TIMINGS.SCROLL_THRESHOLD &&
+      Math.abs(e.deltaY) > ANIMATION_TIMINGS.SCROLL_DELTA_THRESHOLD
+    ) {
       lastScrollTimeRef.current = now;
 
-      // Debounce the scroll action with 50ms delay
+      // Debounce the scroll action
       scrollTimeoutRef.current = setTimeout(() => {
         if (!isAnimating) {
           if (e.deltaY > 0) {
@@ -275,27 +323,30 @@ function App() {
             handlePrevUser(); // Scroll up = previous user
           }
         }
-      }, 50);
+      }, ANIMATION_TIMINGS.SCROLL_DEBOUNCE);
     }
   };
 
   // ==================== COMPUTED VALUES ====================
 
   /** Currently displayed user object */
-  const currentUser = users[currentUserIndex];
+  const currentUser = users.length > 0 ? users[currentUserIndex] : null;
+
+  /** Whether we have users available to display */
+  const hasUsers = users.length > 0;
 
   // ==================== RENDER LOGIC ====================
 
   // Conditional rendering based on current view state
-  if (currentView === "profile") {
+  if (currentView === VIEW_STATES.PROFILE) {
     return <Profile onBack={handleBackHome} />;
   }
 
-  if (currentView === "matches") {
+  if (currentView === VIEW_STATES.MATCHES) {
     return <Matches onBack={handleBackHome} />;
   }
 
-  if (currentView === "likes") {
+  if (currentView === VIEW_STATES.LIKES) {
     return <Likes onBack={handleBackHome} />;
   }
 
@@ -329,11 +380,13 @@ function App() {
         </div>
 
         <div className="relative">
+          {" "}
           <button
             onClick={handleProfileClick}
             className="w-8 h-8 md:w-10 md:h-10 bg-gray-700 rounded-full flex items-center justify-center hover:bg-gray-600 transition-colors"
+            aria-label="Profile menu"
           >
-            👤
+            {DEFAULT_VALUES.USER_AVATAR}
           </button>
           {showDropdown && (
             <div className="absolute right-0 mt-2 w-40 md:w-48 bg-gray-800 rounded-lg shadow-xl border border-gray-700 z-50">
@@ -369,164 +422,179 @@ function App() {
       <div className="flex flex-col md:flex-row h-[calc(100vh-60px)] md:h-[calc(100vh-72px)]">
         {/* Sidebar - Hidden on mobile, shown on desktop */}
         <div className="hidden md:block">
-          <Sidebar onMessageClick={handleMessagesView} />
+          <Sidebar />
         </div>
 
         {/* Main Content - Conditional Rendering */}
         <div className="flex-1 relative overflow-hidden">
-          {currentView === "messages" ? (
+          {currentView === VIEW_STATES.MESSAGES ? (
             /* Messages View */
-            <Messages onBack={handleBackHome} />
+            <Messages
+              onBack={handleBackHome}
+              selectedMatchId={selectedMatchId}
+              hideSidebar={true}
+            />
           ) : (
             /* Tinder-style User Cards View */
             <div
               className="h-full relative overflow-hidden bg-gray-900 flex items-center justify-center p-2 md:p-6"
               onWheel={handleWheel}
             >
-              {/* Navigation Arrows */}
-              <button
-                onClick={handlePrevUser}
-                className="absolute top-2 right-2 md:top-4 md:right-4 z-30 bg-black/30 hover:bg-black/50 p-1.5 md:p-2 rounded-full transition-all duration-300 backdrop-blur-sm"
-                disabled={isAnimating}
-              >
-                <svg
-                  className="w-3 h-3 md:w-4 md:h-4 text-white"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M5 15l7-7 7 7"
-                  />
-                </svg>
-              </button>
+              {/* Navigation Arrows - Only show when we have users */}
+              {hasUsers && !isLoadingUsers && !userError && (
+                <>
+                  <button
+                    onClick={handlePrevUser}
+                    className="absolute top-2 right-2 md:top-4 md:right-4 z-30 bg-black/30 hover:bg-black/50 p-1.5 md:p-2 rounded-full transition-all duration-300 backdrop-blur-sm"
+                    disabled={isAnimating}
+                    aria-label="Previous user"
+                  >
+                    <ArrowUpIcon className="w-3 h-3 md:w-4 md:h-4 text-white" />
+                  </button>
 
-              <button
-                onClick={handleNextUser}
-                className="absolute top-8 right-2 md:top-12 md:right-4 z-30 bg-black/30 hover:bg-black/50 p-1.5 md:p-2 rounded-full transition-all duration-300 backdrop-blur-sm"
-                disabled={isAnimating}
-              >
-                <svg
-                  className="w-3 h-3 md:w-4 md:h-4 text-white"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M19 9l-7 7-7-7"
-                  />
-                </svg>
-              </button>
+                  <button
+                    onClick={handleNextUser}
+                    className="absolute top-8 right-2 md:top-12 md:right-4 z-30 bg-black/30 hover:bg-black/50 p-1.5 md:p-2 rounded-full transition-all duration-300 backdrop-blur-sm"
+                    disabled={isAnimating}
+                    aria-label="Next user"
+                  >
+                    <ArrowDownIcon className="w-3 h-3 md:w-4 md:h-4 text-white" />
+                  </button>
+                </>
+              )}
 
               {/* Card Container - Responsive width */}
               <div className="w-full max-w-sm md:w-[70%] md:max-w-none h-[90%] md:h-[85%] relative rounded-2xl md:rounded-3xl overflow-hidden shadow-2xl">
-                {/* Current Card */}
-                <div
-                  key={currentUser.id}
-                  className={`absolute inset-0 transition-all duration-400 ease-in-out ${
-                    isAnimating
-                      ? "transform -translate-y-full opacity-0"
-                      : "transform translate-y-0 opacity-100"
-                  }`}
-                >
-                  {/* Background Image */}
-                  <div className="absolute inset-0">
-                    <img
-                      src={currentUser.avatar.replace(
-                        "w=150&h=150",
-                        "w=800&h=1000"
-                      )}
-                      alt={currentUser.handle}
-                      className="w-full h-full object-cover"
-                      onError={(e) => {
-                        e.target.style.display = "none";
-                        e.target.nextSibling.style.display = "flex";
-                      }}
-                    />
-                    <div className="w-full h-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-4xl md:text-6xl text-white hidden">
-                      👤
-                    </div>
-                    {/* Gradient Overlay */}
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-transparent"></div>
-                  </div>
-
-                  {/* Content Overlay at Bottom */}
-                  <div className="absolute bottom-0 left-0 right-0 p-4 md:p-6 text-white z-20">
-                    {/* User Info */}
-                    <div className="mb-2 md:mb-3">
-                      <h2 className="text-xl md:text-2xl font-bold mb-1">
-                        {currentUser.handle}
-                      </h2>
-                      <p className="text-white/80 text-sm md:text-base">
-                        {currentUser.age} • {currentUser.location}
-                      </p>
-                    </div>
-
-                    {/* Bio */}
-                    <div className="mb-2 md:mb-3">
-                      <p className="text-white/90 text-xs md:text-sm italic">
-                        "{currentUser.bio}"
-                      </p>
+                {/* Loading State */}
+                {isLoadingUsers ? (
+                  <LoadingState message="Finding amazing people..." />
+                ) : userError ? (
+                  /* Error State */
+                  <ErrorState
+                    message={userError}
+                    onRetry={fetchUserFeed}
+                    className="absolute inset-0 bg-gray-800 flex items-center justify-center"
+                  />
+                ) : !hasUsers ? (
+                  /* No Users State */
+                  <EmptyState
+                    message="No more users to show right now."
+                    onAction={fetchUserFeed}
+                    actionText="Refresh"
+                    className="absolute inset-0 bg-gray-800 flex items-center justify-center"
+                  />
+                ) : (
+                  /* Current Card */
+                  <div
+                    key={currentUser.id}
+                    className={`absolute inset-0 transition-all duration-400 ease-in-out ${
+                      isAnimating
+                        ? "transform -translate-y-full opacity-0"
+                        : "transform translate-y-0 opacity-100"
+                    }`}
+                  >
+                    {/* Background Image */}
+                    <div className="absolute inset-0">
+                      <img
+                        src={currentUser.profilePic}
+                        alt={currentUser.handle}
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          e.target.style.display = "none";
+                          e.target.nextSibling.style.display = "flex";
+                        }}
+                      />
+                      <div className="w-full h-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-4xl md:text-6xl text-white hidden">
+                        {DEFAULT_VALUES.USER_AVATAR}
+                      </div>
+                      {/* Gradient Overlay */}
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-transparent"></div>
                     </div>
 
-                    {/* Struggles */}
-                    <div className="mb-3 md:mb-4">
-                      <div className="flex flex-wrap gap-1 md:gap-2">
-                        {currentUser.struggles.map((struggle, index) => (
-                          <span
-                            key={index}
-                            className="bg-white/20 text-white text-xs px-2 md:px-3 py-1 rounded-full backdrop-blur-sm"
-                          >
-                            {struggle}
-                          </span>
-                        ))}
+                    {/* Content Overlay at Bottom */}
+                    <div className="absolute bottom-0 left-0 right-0 p-4 md:p-6 text-white z-20">
+                      {/* User Info */}
+                      <div className="mb-2 md:mb-3">
+                        <h2 className="text-xl md:text-2xl font-bold mb-1">
+                          {currentUser.handle}
+                        </h2>
+                        <p className="text-white/80 text-sm md:text-base">
+                          {currentUser.age} • {currentUser.location}
+                        </p>
+                      </div>
+
+                      {/* Bio */}
+                      <div className="mb-2 md:mb-3">
+                        <p className="text-white/90 text-xs md:text-sm italic">
+                          "{currentUser.bio}"
+                        </p>
+                      </div>
+
+                      {/* Struggles */}
+                      <div className="mb-3 md:mb-4">
+                        <div className="flex flex-wrap gap-1 md:gap-2">
+                          {currentUser.tags.map((struggle, index) => (
+                            <span
+                              key={index}
+                              className="bg-white/20 text-white text-xs px-2 md:px-3 py-1 rounded-full backdrop-blur-sm"
+                            >
+                              {struggle}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Action Buttons */}
+                      <div className="flex space-x-2 md:space-x-3">
+                        <Button
+                          onClick={passUser}
+                          disabled={isAnimating}
+                          variant="danger"
+                          className="flex-1 bg-red-500/80 hover:bg-red-500 backdrop-blur-sm border border-red-400/50"
+                        >
+                          Pass
+                        </Button>
+                        <Button
+                          onClick={() => likeUser(currentUser._id)}
+                          disabled={isAnimating}
+                          variant="success"
+                          className="flex-1 bg-green-500/80 hover:bg-green-500 backdrop-blur-sm border border-green-400/50"
+                        >
+                          Connect
+                        </Button>
                       </div>
                     </div>
 
-                    {/* Action Buttons */}
-                    <div className="flex space-x-2 md:space-x-3">
-                      <button className="flex-1 bg-red-500/80 hover:bg-red-500 py-2 md:py-3 px-4 md:px-6 rounded-lg md:rounded-xl transition-all duration-300 font-semibold text-white backdrop-blur-sm border border-red-400/50 text-sm md:text-base">
-                        Pass
-                      </button>
-                      <button className="flex-1 bg-green-500/80 hover:bg-green-500 py-2 md:py-3 px-4 md:px-6 rounded-lg md:rounded-xl transition-all duration-300 font-semibold text-white backdrop-blur-sm border border-green-400/50 text-sm md:text-base">
-                        Connect
-                      </button>
+                    {/* User Counter */}
+                    <div className="absolute top-2 left-2 md:top-4 md:left-4 bg-black/30 px-2 md:px-3 py-1 rounded-full backdrop-blur-sm z-20">
+                      <span className="text-xs text-white">
+                        {currentUserIndex + 1} / {users.length}
+                      </span>
                     </div>
                   </div>
+                )}
 
-                  {/* User Counter */}
-                  <div className="absolute top-2 left-2 md:top-4 md:left-4 bg-black/30 px-2 md:px-3 py-1 rounded-full backdrop-blur-sm z-20">
-                    <span className="text-xs text-white">
-                      {currentUserIndex + 1} / {users.length}
-                    </span>
+                {/* Next Card Preview (for smooth animation) - only show if we have users */}
+                {hasUsers && !isLoadingUsers && !userError && (
+                  <div
+                    className={`absolute inset-0 transition-all duration-400 ease-in-out ${
+                      isAnimating
+                        ? "transform translate-y-0 opacity-100"
+                        : "transform translate-y-full opacity-0"
+                    }`}
+                  >
+                    <div className="absolute inset-0">
+                      <img
+                        src={currentUser.profilePic}
+                        alt={
+                          users[(currentUserIndex + 1) % users.length].handle
+                        }
+                        className="w-full h-full object-cover"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-transparent"></div>
+                    </div>
                   </div>
-                </div>
-
-                {/* Next Card Preview (for smooth animation) */}
-                <div
-                  className={`absolute inset-0 transition-all duration-400 ease-in-out ${
-                    isAnimating
-                      ? "transform translate-y-0 opacity-100"
-                      : "transform translate-y-full opacity-0"
-                  }`}
-                >
-                  <div className="absolute inset-0">
-                    <img
-                      src={users[
-                        (currentUserIndex + 1) % users.length
-                      ].avatar.replace("w=150&h=150", "w=800&h=1000")}
-                      alt={users[(currentUserIndex + 1) % users.length].handle}
-                      className="w-full h-full object-cover"
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-transparent"></div>
-                  </div>
-                </div>
+                )}
               </div>
 
               {/* Mobile Bottom Navigation */}
@@ -535,58 +603,25 @@ function App() {
                   onClick={handleMatchesView}
                   className="bg-black/30 hover:bg-black/50 p-3 rounded-full transition-all duration-300 backdrop-blur-sm"
                   title="Matches"
+                  aria-label="View matches"
                 >
-                  <svg
-                    className="w-5 h-5 text-white"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"
-                    />
-                  </svg>
+                  <HeartIcon className="w-5 h-5 text-white" />
                 </button>
                 <button
                   onClick={handleLikesView}
                   className="bg-black/30 hover:bg-black/50 p-3 rounded-full transition-all duration-300 backdrop-blur-sm"
                   title="Likes"
+                  aria-label="View likes"
                 >
-                  <svg
-                    className="w-5 h-5 text-white"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.06L7 20m7-10V5a2 2 0 00-2-2h-.095c-.5 0-.905.405-.905.905 0 .714-.211 1.412-.608 2.006L7 11v9m7-10h-2M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2.5"
-                    />
-                  </svg>
+                  <ThumbsUpIcon className="w-5 h-5 text-white" />
                 </button>
                 <button
                   onClick={handleMessagesView}
                   className="bg-black/30 hover:bg-black/50 p-3 rounded-full transition-all duration-300 backdrop-blur-sm"
                   title="Messages"
+                  aria-label="View messages"
                 >
-                  <svg
-                    className="w-5 h-5 text-white"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
-                    />
-                  </svg>
+                  <MessageIcon className="w-5 h-5 text-white" />
                 </button>
               </div>
             </div>

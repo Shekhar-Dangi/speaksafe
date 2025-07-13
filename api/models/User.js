@@ -26,6 +26,8 @@ const UserSchema = new mongoose.Schema(
     matches: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }], // mutual matches
     notifications: [NotificationSchema],
     messages: [MessageSchema], // all messages sent/received
+    isOnline: { type: Boolean, default: false },
+    lastSeen: { type: Date, default: Date.now },
   },
   { timestamps: true }
 );

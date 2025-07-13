@@ -79,8 +79,10 @@ function Matches({ onBack }) {
    * @param {string} matchId - ID of the match to message
    */
   const handleMessage = (matchId) => {
-    // TODO: Implement navigation to specific conversation
-    console.log("Message match:", matchId);
+    // Navigate to messages view - this could be enhanced to pass the specific match
+    window.dispatchEvent(
+      new CustomEvent("navigateToMessages", { detail: { matchId } })
+    );
   };
 
   // ==================== RENDER GUARD ====================

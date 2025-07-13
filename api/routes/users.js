@@ -72,7 +72,7 @@ router.get("/liked", ensureAuth, async (req, res) => {
     "likedUsers",
     "name profilePic tags bio"
   );
-  res.json({ likedUsers: user.likedUsers });
+  res.json({ users: user.likedUsers });
 });
 
 // Get users who liked you
@@ -81,14 +81,14 @@ router.get("/likedby", ensureAuth, async (req, res) => {
     "likedBy",
     "name profilePic tags bio"
   );
-  res.json({ likedBy: user.likedBy });
+  res.json({ users: user.likedBy });
 });
 
 // Get mutual matches
 router.get("/matches", ensureAuth, async (req, res) => {
   const user = await User.findById(req.user._id).populate(
     "matches",
-    "name profilePic tags bio"
+    "name profilePic tags bio isOnline lastSeen"
   );
   res.json({ matches: user.matches });
 });
@@ -233,5 +233,36 @@ router.delete(
     res.json({ tags: user.tags });
   }
 );
+
+/**
+ * @route PUT /users/me
+ * @desc Update user profile (bio, etc.)
+ * @access Private
+ */
+router.put("/me", ensureAuth, async (req, res) => {
+  try {
+    const { bio } = req.body;
+    const user = await User.findById(req.user._id);
+
+    if (bio !== undefined) {
+      user.bio = bio;
+    }
+
+    await user.save();
+    res.json({
+      success: true,
+      user: {
+        _id: user._id,
+        name: user.name,
+        profilePic: user.profilePic,
+        bio: user.bio,
+        tags: user.tags,
+      },
+    });
+  } catch (error) {
+    console.error("Error updating user profile:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+});
 
 module.exports = router;

@@ -36,25 +36,37 @@ function setupWebSocket(server, sessionStore) {
   }
 
   wss.on("connection", (ws, req) => {
+    console.log("New WebSocket connection attempt");
     parseSession(ws, req, async (userId) => {
       if (!userId) {
+        console.log("WebSocket connection rejected - no session");
         ws.close();
         return;
       }
+      console.log("WebSocket connection established for user:", userId);
       clients.set(userId, ws);
       ws.userId = userId;
 
       ws.on("message", async (message) => {
+        console.log(
+          "Received message from user",
+          userId,
+          ":",
+          message.toString()
+        );
         try {
           const data = JSON.parse(message).data[0];
           if (data.type === "message") {
+            console.log("Processing message to:", data.to);
             const { to, content } = data;
             // Check if users are mutual matches
             const user = await User.findById(userId);
             if (!user.matches.includes(to)) {
+              console.log("Users are not mutual matches");
               ws.send(JSON.stringify({ error: "Not a mutual match" }));
               return;
             }
+            console.log("Users are mutual matches - proceeding");
             // Save message to both users
             const msgObj = {
               from: userId,
@@ -78,6 +90,7 @@ function setupWebSocket(server, sessionStore) {
             // Send to recipient if online
             const recipientWs = clients.get(to);
             if (recipientWs) {
+              console.log("Sending message to online recipient:", to);
               recipientWs.send(
                 JSON.stringify({
                   type: "message",
@@ -87,6 +100,7 @@ function setupWebSocket(server, sessionStore) {
                 })
               );
             } else {
+              console.log("Recipient is offline, adding notification");
               // Add notification for offline user
               await User.updateOne(
                 { _id: to },
