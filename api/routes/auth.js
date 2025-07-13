@@ -16,7 +16,7 @@ router.get(
   }),
   (req, res) => {
     // Redirect to frontend with success
-    res.redirect(`${process.env.CLIENT_URL}/dashboard?auth=success`);
+    res.redirect(`${process.env.CLIENT_URL}`);
   }
 );
 
